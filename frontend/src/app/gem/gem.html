@@ -1,0 +1,89 @@
+<div class="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
+	<header class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between shadow-md">
+		<h1 class="text-xl font-bold tracking-wide text-indigo-400">AI Resume Analyzer</h1>
+	</header>
+
+	<div class="flex flex-1 overflow-hidden">
+		<aside class="w-80 bg-gray-800/50 p-6 border-r border-gray-700 flex flex-col gap-6">
+			<div>
+				<h2 class="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3">1. Add Context Document
+				</h2>
+				<label
+					class="flex flex-col items-center justify-center border-2 border-dashed border-gray-600 hover:border-indigo-500 rounded-lg p-4 cursor-pointer transition bg-gray-800 group">
+					<svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-400 mb-2" fill="none"
+						stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+							d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+					</svg>
+					<span class="text-sm text-gray-300 font-medium group-hover:text-indigo-300">Choose PDF
+						Document</span>
+					<input type="file" class="hidden" accept=".pdf" (change)="onFileSelected($event)" />
+				</label>
+				@if (selectedFile()) {
+				<p class="mt-2 text-xs text-indigo-400 truncate font-mono">📁 {{ selectedFile()?.name }}</p>
+				}
+			</div>
+
+			<button [disabled]="!selectedFile() || isUploading()" (click)="uploadDocument()"
+				class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-medium py-2.5 px-4 rounded-lg shadow-lg transition duration-200">
+				@if (isUploading()) { ⚡ Engineering Embeddings... } @else { Parse Document }
+			</button>
+
+			@if (statusMessage()) {
+			<div
+				class="p-3 rounded-lg text-xs bg-gray-800 border border-gray-700 text-gray-300 font-mono whitespace-pre-line">
+				{{ statusMessage() }}
+			</div>
+			}
+		</aside>
+
+		<main class="flex-1 flex flex-col bg-gray-900">
+			<div class="flex-1 p-6 overflow-y-auto space-y-4">
+				@if (chatHistory().length === 0) {
+				<div class="h-full flex flex-col items-center justify-center text-center text-gray-500">
+					<p class="text-lg">Get Started</p>
+					<p class="text-sm">Upload a valid PDF to start asking smart questions.</p>
+				</div>
+				}
+
+				@for (msg of chatHistory(); track $index) {
+				<div [ngClass]="{'justify-end': msg.sender === 'user'}" class="flex w-full">
+					<div [ngClass]="{
+              'bg-indigo-600 text-white rounded-br-none': msg.sender === 'user',
+              'bg-gray-800 border border-gray-700 text-gray-100 rounded-bl-none': msg.sender === 'bot'
+            }" class="max-w-2xl px-4 py-3 rounded-2xl shadow-md text-sm leading-relaxed">
+						<p class="font-semibold text-xs opacity-70 mb-1">
+							{{ msg.sender === 'user' ? 'You' : 'Llama 3 Local AI' }}
+						</p>
+						<p class="whitespace-pre-line">{{ msg.text }}</p>
+					</div>
+				</div>
+				}
+
+				@if (isQuerying()) {
+				<div class="flex w-full justify-start animate-pulse">
+					<div class="bg-gray-800 border border-gray-700 p-4 rounded-2xl rounded-bl-none max-w-sm">
+						<div class="flex space-x-2">
+							<div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
+							<div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+							<div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+						</div>
+					</div>
+				</div>
+				}
+			</div>
+
+			<div class="p-4 bg-gray-800/40 border-t border-gray-700">
+				<div class="max-w-4xl mx-auto flex gap-3">
+					<input type="text" [(ngModel)]="userQuery" (keyup.enter)="sendQuery()"
+						placeholder="Ask something..."
+						class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500" />
+					<button (click)="sendQuery()" [disabled]="!userQuery().trim() || isQuerying()"
+						class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-6 py-3 rounded-xl transition shadow-lg disabled:opacity-50">
+						Send
+					</button>
+				</div>
+			</div>
+		</main>
+	</div>
+</div>
