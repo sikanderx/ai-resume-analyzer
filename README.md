@@ -76,7 +76,7 @@ https://ollama.com
 Run a model locally:
 
 ```bash
-ollama run llama3
+ollama run llama3.2:3b
 ```
 
 Ensure Ollama is running before starting the application.
