@@ -1,24 +1,22 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Native PDF parsing library
 from pypdf import PdfReader
 
-# Vector Store & Splits
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 
-# Your preferred LCEL modules 🌟
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.documents import Document  # Standard text wrapper
+from langchain_core.documents import Document
 
-app = FastAPI(title="Angular 22 & Ollama RAG Backend")
+app = FastAPI(title="Resume Analyzer Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,11 +37,17 @@ lcel_rag_chain = None
 class QueryRequest(BaseModel):
     question: str
 
+class JobMatchRequest(BaseModel):
+    job_description: str
+
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(
+    file: UploadFile = File(...),
+    job_description: Optional[str] = Form(None)
+):
     global retriever, lcel_rag_chain
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
@@ -80,12 +84,13 @@ async def upload_pdf(file: UploadFile = File(...)):
         retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 
         # 3. LLM Setup
-        llm = ChatOllama(model="llama3:latest", temperature=0.3)
+        llm = ChatOllama(model="llama3.2:3b", temperature=0.3)
+        json_llm = ChatOllama(model="llama3.2:3b", temperature=0.1, format="json")
 
         # 4. Prompt Structure
         prompt = ChatPromptTemplate.from_template(
-            "You are an assistant for question-answering tasks.\n"
-            "Use the following pieces of retrieved context to answer the question.\n"
+            "You are an expert HR assistant and resume reviewer.\n"
+            "Use the following pieces of retrieved context from the resume to answer the question accurately.\n"
             "If you don't know the answer, say that you don't know.\n\n"
             "Context:\n{context}\n\n"
             "Question: {question}\n\n"
@@ -100,40 +105,70 @@ async def upload_pdf(file: UploadFile = File(...)):
             | StrOutputParser()
         )
 
-        return {"message": f"Successfully processed {file.filename}", "chunks": len(splits)}
+        # 6. Base Strategy: Always parse the structured resume summary
+        analysis_prompt = ChatPromptTemplate.from_template(
+            "You are an ATS (Applicant Tracking System) parser. Analyze the following resume text and extract the details "
+            "into a clean, structured JSON format with these exact keys: 'name', 'summary', 'skills', 'experience', 'education'.\n"
+            "Keep the item entries concise.\n\n"
+            "Resume Text:\n{resume_text}\n\n"
+            "Respond ONLY with valid JSON."
+        )
+        analysis_chain = analysis_prompt | json_llm | JsonOutputParser()
+        structured_analysis = analysis_chain.invoke({"resume_text": full_text})
+
+        response_payload = {
+            "message": f"Successfully processed {file.filename}",
+            "chunks": len(splits),
+            "analysis": structured_analysis,
+            "match_results": None
+        }
+
+        # 7. Conditional Strategy: If job description is provided, run match evaluation
+        if job_description and job_description.strip():
+            match_prompt = ChatPromptTemplate.from_template(
+                "You are an elite corporate recruiter. Compare the candidate's resume text against the provided Job Description.\n"
+                "Evaluate them meticulously and output your assessment strictly in JSON format with these exact keys:\n"
+                "- 'match_percentage': an integer from 0 to 100\n"
+                "- 'matching_skills': a list of strings representing skills present in both\n"
+                "- 'missing_skills': a list of key skills requested in the job description but missing or weak in the resume\n"
+                "- 'feedback': a short paragraph with actionable advice to tailor the resume for this specific role.\n\n"
+                "Job Description:\n{job_desc}\n\n"
+                "Resume Text:\n{resume_text}\n\n"
+                "Respond ONLY with valid JSON."
+            )
+            match_chain = match_prompt | json_llm | JsonOutputParser()
+            match_results = match_chain.invoke({
+                "job_desc": job_description,
+                "resume_text": full_text
+            })
+            response_payload["match_results"] = match_results
+
+        return response_payload
 
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def get_direct_chat_chain():
-    llm = ChatOllama(model="llama3:latest", temperature=0.3)
-    prompt = ChatPromptTemplate.from_template(
-        "You are a helpful AI assistant. Answer the user's question directly.\n\n"
-        "Question: {question}\n\n"
-        "Answer:"
-    )
-    return (
-        {"question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-
 @app.post("/api/chat")
 async def chat(payload: QueryRequest):
     global lcel_rag_chain
 
     try:
-        # Condition A: A PDF was uploaded, use the RAG pipeline 📄
+        # Condition A: A PDF was uploaded, use the RAG pipeline
         if lcel_rag_chain is not None:
             response_text = lcel_rag_chain.invoke(payload.question)
             return {"answer": response_text}
 
-        # Condition B: No PDF uploaded, chat directly with Llama 3 🧠
+        # Condition B: No PDF uploaded, chat directly with LLM
         else:
-            direct_chain = get_direct_chat_chain()
+            llm = ChatOllama(model="llama3.2:3b", temperature=0.3, num_ctx=2048)
+            prompt = ChatPromptTemplate.from_template(
+                "You are a career coach and professional resume reviewer. Answer the user's question directly and constructively.\n\n"
+                "Question: {question}\n\n"
+                "Answer:"
+            )
+            direct_chain = {"question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
             response_text = direct_chain.invoke(payload.question)
             return {"answer": response_text}
 
